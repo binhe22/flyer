@@ -4,6 +4,7 @@ import argparse
 import redis
 from scpfile import scp
 import pexpect
+import time
 
 class flyer():
     id = 0
@@ -11,34 +12,61 @@ class flyer():
     redisIp = ""
     redisPort = 0
     redisPassword = ""
-    def __init__(self, redisIp="127.0.0.1", redisPort=6379, redisPassword="", redisDb=10):
+    totalProcessNum = 0
+    def __init__(self, redisIp="127.0.0.1", redisPort=6379, redisPassword="", redisDb=10, totalProcessNum = 2 ):
         """get redis instance and check if it can be used"""
         self.redisIp = redisIp
         self.redisPort = redisPort
         self.redisPassword = redisPassword
         self.redisDb = redisDb
+        self.totalProcessNum = totalProcessNum
         r = self.getRedis()
         if r.ping():
             ps = r.pubsub()
             ps.subscribe("rootChannel")  #订阅两个频道，分别是count_alarm ip_alarm
             self.channels["rootChannel"] = ps
             print "init ok"
-            return 1
-        else:
-            return 0
 
     def getRedis(self):
         pool = redis.ConnectionPool(host=self.redisIp, port=self.redisPort, password=self.redisPassword, db=self.redisDb)
         return redis.Redis(connection_pool=pool)
 
-    def getPubsub():
+    def getPubsub(self):
         r = self.getRedis()
         return r.pubsub()
 
     def start(self):
         """get the process id in the cluster"""
         r = self.getRedis()
-        self.id = r.incr("flyerId")
+        while 1:
+            if r.setnx("flyerLock", 1):
+                self.id = r.incr("flyerId")
+                print self.id,"get lock"
+                if self.id != 1:
+                    r.delete("flyerLock")
+                    print "id",self.id,"watiing"
+                    print self.id,"release lock"
+                    self.recieveAll()
+                    print "id",self.id,"starting"
+                elif self.id == 1:
+                    self.clean()
+                    print "id:",self.id
+                    r.delete("flyerLock")
+                    print self.id, "release lock"
+                    retryNum = 10
+                    count = 0
+                    while 1:
+                        if r.get("registedNum") == self.totalProcessNum:
+                            self.sendAll("start")
+                            break
+                        else:
+                            time.sleep(1)
+                        count += 1
+                        if count>= retryNum:
+                            print "start time out"
+                            break
+            else:
+                time.sleep(0.2)
         return self.id
 
     def stop(self):
@@ -51,29 +79,31 @@ class flyer():
         """send message to chanel (if you want sent to specific process you can use
         difference chanel name in different process)"""
         r = self.getRedis()
-        ps = r.pubsub()
-        return ps.publish(channelName, message)
+        return r.publish(channelName, message)
 
     def recieve(self, channelName):
         """recieve num messages from chanel"""
         ps = self.getPubsub()
-        ps.subscribe(channelName)  #订阅两个频道，分别是count_alarm ip_alarm
+        ps.subscribe(channelName)
         for item in ps.listen():
             if item['type'] == 'message':
                     return item["data"]
 
     def sendAll(self, message):
         """send message to each process"""
-        ps = self.getPubsub()
-        ps.publish("rootChannel", message)
+        r = self.getRedis()
+        r.publish("rootChannel", message)
 
-    def recieve():
+    def recieveAll(self):
         """recieve message from all"""
         ps = self.channels["rootChannel"]
         for item in ps.listen():
             if item['type'] == 'message':
                     return item["data"]
-
+    def clean(self):
+        r = self.getRedis()
+        r.set("flyerStop", 0)
+        r.set("flyerId", 0)
 
 
 if __name__ == "__main__":
@@ -87,7 +117,9 @@ if __name__ == "__main__":
     if not exeInfo:
         print "error: no file", results.exeFile
         exit()
+
     flyerTest = flyer()
+    flyerTest.clean()
 
 
 
