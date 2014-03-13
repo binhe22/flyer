@@ -1,10 +1,15 @@
 #!/usr/bin/env python
 #coding=utf-8
+import gevent
+from gevent import monkey;monkey.patch_all();
 import argparse
 import redis
 from scpfile import scp
 import pexpect
 import time
+from redisconfig import config
+
+geventThread = []
 
 class flyer():
     id = 0
@@ -12,14 +17,12 @@ class flyer():
     redisIp = ""
     redisPort = 0
     redisPassword = ""
-    totalProcessNum = 0
-    def __init__(self, redisIp="127.0.0.1", redisPort=6379, redisPassword="", redisDb=10, totalProcessNum = 2 ):
+    def __init__(self, redisIp=config["redisIp"], redisPort=config["redisPort"], redisPassword=config["redisPassword"], redisDb=config["redisDb"] ):
         """get redis instance and check if it can be used"""
         self.redisIp = redisIp
         self.redisPort = redisPort
         self.redisPassword = redisPassword
         self.redisDb = redisDb
-        self.totalProcessNum = totalProcessNum
         r = self.getRedis()
         if r.ping():
             ps = r.pubsub()
@@ -38,35 +41,7 @@ class flyer():
     def start(self):
         """get the process id in the cluster"""
         r = self.getRedis()
-        while 1:
-            if r.setnx("flyerLock", 1):
-                self.id = r.incr("flyerId")
-                print self.id,"get lock"
-                if self.id != 1:
-                    r.delete("flyerLock")
-                    print "id",self.id,"watiing"
-                    print self.id,"release lock"
-                    self.recieveAll()
-                    print "id",self.id,"starting"
-                elif self.id == 1:
-                    self.clean()
-                    print "id:",self.id
-                    r.delete("flyerLock")
-                    print self.id, "release lock"
-                    retryNum = 10
-                    count = 0
-                    while 1:
-                        if r.get("registedNum") == self.totalProcessNum:
-                            self.sendAll("start")
-                            break
-                        else:
-                            time.sleep(1)
-                        count += 1
-                        if count>= retryNum:
-                            print "start time out"
-                            break
-            else:
-                time.sleep(0.2)
+        self.id = r.incr("flyerId")
         return self.id
 
     def stop(self):
@@ -102,24 +77,48 @@ class flyer():
                     return item["data"]
     def clean(self):
         r = self.getRedis()
-        r.set("flyerStop", 0)
-        r.set("flyerId", 0)
+        r.flushdb()
+
+def runProcess(cmd):
+    child=pexpect.spawn(cmd)
+    print child.read()
+    child.close()
+    return 1
+
+
+def stop():
+    pass
+
+def sshRun(hostFile, remotePath, localFile):
+    f = open(hostFile)
+    hostList = []
+    for i in f.readlines():
+        hostList.append(i)
+    f.close()
+    cmdList = []
+    for i in xrange(len(hostList)):
+        cmd='ssh %s "python %s >%slog%d"'%(hostList[i],remotePath+"/"+localFile, remotePath+"/",i)
+        cmdList.append(cmd)
+    gevent.joinall([ gevent.spawn(runProcess, cmd) for cmd in cmdList]+[gevent.spawn(stop)])
+    return 1
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Flyer--An easy MPI-like distributed\
             tool for python, to ran applications in clusters.')
     parser.add_argument('--h', action="store", default="host.list", dest="hostList")
-    parser.add_argument('--e', action="store", dest="exeFile")
+    parser.add_argument('--f', action="store", default="file.list", dest="fileList")
     parser.add_argument('--r', action="store", default="/tmp", dest="rpath")
+    parser.add_argument('--e', action="store", default="run.py", dest="exeFile")
     results = parser.parse_args()
-    exeInfo = scp(results.hostList, results.rpath, results.exeFile)
-    if not exeInfo:
-        print "error: no file", results.exeFile
-        exit()
-
+    print results.exeFile
     flyerTest = flyer()
     flyerTest.clean()
+    print flyerTest.start()
+    scpInfo = scp(results.hostList, results.rpath, results.fileList)
+    sshRun(results.hostList, results.rpath, results.exeFile)
+
+
 
 
 
