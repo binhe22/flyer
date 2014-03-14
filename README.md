@@ -22,3 +22,6 @@ The flyer include the class the run.py has to inherit, by using redis to pass me
 * Use a redis cluster
 * Write some examples
 * Add other functions if necessary
+
+###Example
+run.py 
