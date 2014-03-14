@@ -9,7 +9,6 @@ import pexpect
 import time
 from redisconfig import config
 
-geventThread = []
 
 class flyer():
     id = 0
@@ -31,10 +30,12 @@ class flyer():
             print "init ok"
 
     def getRedis(self):
+        """return the redis instance"""
         pool = redis.ConnectionPool(host=self.redisIp, port=self.redisPort, password=self.redisPassword, db=self.redisDb)
         return redis.Redis(connection_pool=pool)
 
     def getPubsub(self):
+        """return the redis instance"""
         r = self.getRedis()
         return r.pubsub()
 
@@ -106,17 +107,17 @@ def sshRun(hostFile, remotePath, localFile):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Flyer--An easy MPI-like distributed\
             tool for python, to ran applications in clusters.')
-    parser.add_argument('--h', action="store", default="host.list", dest="hostList")
-    parser.add_argument('--f', action="store", default="file.list", dest="fileList")
-    parser.add_argument('--r', action="store", default="/tmp", dest="rpath")
-    parser.add_argument('--e', action="store", default="run.py", dest="exeFile")
-    results = parser.parse_args()
+    parser.add_argument('--h', action="store", default="host.list", dest="hostList") #the host use, one line for one proccess
+    parser.add_argument('--f', action="store", default="file.list", dest="fileList") #the file to copy
+    parser.add_argument('--r', action="store", default="/tmp", dest="rpath") #the remote path to use ,save the file
+    parser.add_argument('--e', action="store", default="run.py", dest="exeFile") #the file to exe
+    results = parser.parse_args() #get arg
     print results.exeFile
-    flyerTest = flyer()
-    flyerTest.clean()
+    flyerTest = flyer() #get instance
+    flyerTest.clean() #clean redis to use for next process
     print flyerTest.start()
-    scpInfo = scp(results.hostList, results.rpath, results.fileList)
-    sshRun(results.hostList, results.rpath, results.exeFile)
+    scpInfo = scp(results.hostList, results.rpath, results.fileList) #copy file
+    sshRun(results.hostList, results.rpath, results.exeFile) #start run
 
 
 
